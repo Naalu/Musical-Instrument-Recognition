@@ -1,9 +1,3 @@
-# Edit .gitignore
-nano .gitignore
-```
-
-**Replace/add this content** (make sure these lines are there):
-```
 # Python
 __pycache__/
 *.py[cod]
