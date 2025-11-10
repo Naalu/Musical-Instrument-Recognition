@@ -217,11 +217,15 @@ def parse_test_labels(label_file: Path) -> List[str]:
 def index_test_data(data_dir: str | Path) -> pd.DataFrame:
     """Create an index of all IRMAS test data.
 
-    Scans the IRMAS-TestingData-Part1 directory and pairs .wav files
-    with their corresponding .txt label files.
+    Scans all IRMAS test data parts (Part1, Part2, Part3) and pairs
+    .wav files with their corresponding .txt label files.
+
+    Note: Test data is split across multiple zip files with inconsistent
+    nested directory naming (Part1, IRTestingData-Part2, Part3).
 
     Args:
-        data_dir: Path to IRMAS-TestingData-Part1 directory.
+        data_dir: Path to directory containing test data
+                 (either IRMAS-TestingData-Part1/2/3, or parent).
 
     Returns:
         DataFrame with columns:
@@ -229,54 +233,128 @@ def index_test_data(data_dir: str | Path) -> pd.DataFrame:
         - labels: list of instrument labels present
         - label_indices: list of label indices
         - filename: original filename
+        - part: which part the file came from (1, 2, or 3)
 
     Raises:
         FileNotFoundError: If data_dir doesn't exist.
         ValueError: If no audio files found.
 
     Example:
+        >>> # Can pass individual part directory
         >>> df = index_test_data('data/raw/IRMAS-TestingData-Part1')
-        >>> df.iloc[0]['labels']
-        ['gel', 'pia']
+        >>> # Or pass parent directory to index all parts
+        >>> df = index_test_data('data/raw')
+        >>> len(df)
+        2874
     """
     data_dir = Path(data_dir)
 
     if not data_dir.exists():
         raise FileNotFoundError(f"Test data directory not found: {data_dir}")
 
-    # Find all .wav files
-    wav_files = sorted(data_dir.glob("*.wav"))
+    # Find all test data parts
+    search_dirs = []
 
-    if not wav_files:
-        raise ValueError(f"No audio files found in {data_dir}")
+    # Check if data_dir itself is a part directory
+    if data_dir.name.startswith("IRMAS-TestingData-Part"):
+        # Look for nested directories with various naming patterns
+        possible_subdirs = list(data_dir.glob("*"))
 
+        for subdir in possible_subdirs:
+            if subdir.is_dir() and (".wav" in str(list(subdir.glob("*.wav"))[:1])):
+                # This directory contains .wav files
+                search_dirs.append(subdir)
+                print(f"Note: Using nested directory: {subdir}")
+                break
+
+        # If no nested directory found, use the parent directly
+        if not search_dirs:
+            search_dirs.append(data_dir)
+    else:
+        # data_dir is a parent, find all Part directories
+        for part_name in [
+            "IRMAS-TestingData-Part1",
+            "IRMAS-TestingData-Part2",
+            "IRMAS-TestingData-Part3",
+        ]:
+            part_dir = data_dir / part_name
+            if part_dir.exists():
+                # Look for any subdirectory that contains .wav files
+                found_subdir = False
+                for subdir in part_dir.iterdir():
+                    if subdir.is_dir():
+                        wav_count = len(list(subdir.glob("*.wav")))
+                        if wav_count > 0:
+                            search_dirs.append(subdir)
+                            print(f"Note: Found test data in: {subdir}")
+                            found_subdir = True
+                            break
+
+                # If no nested directory found with .wav files, use parent
+                if not found_subdir:
+                    wav_count = len(list(part_dir.glob("*.wav")))
+                    if wav_count > 0:
+                        search_dirs.append(part_dir)
+                        print(f"Note: Found test data in: {part_dir}")
+
+    if not search_dirs:
+        raise ValueError(f"No test data directories found in {data_dir}")
+
+    # Collect records from all parts
     records = []
 
-    for wav_file in wav_files:
-        # Corresponding label file
-        label_file = wav_file.with_suffix(".txt")
+    for search_dir in search_dirs:
+        # Determine which part this is from the path
+        path_str = str(search_dir)
+        if "Part1" in path_str or "part1" in path_str.lower():
+            part_num = 1
+        elif "Part2" in path_str or "part2" in path_str.lower():
+            part_num = 2
+        elif "Part3" in path_str or "part3" in path_str.lower():
+            part_num = 3
+        else:
+            part_num = 0  # Unknown
 
-        if not label_file.exists():
-            print(f"Warning: Label file not found for {wav_file.name}")
+        # Find all .wav files
+        wav_files = sorted(search_dir.glob("*.wav"))
+
+        if not wav_files:
+            print(f"Warning: No audio files found in {search_dir}")
             continue
 
-        # Parse labels
-        labels = parse_test_labels(label_file)
+        print(f"  Found {len(wav_files)} files in Part{part_num}")
 
-        # Convert to indices
-        label_indices = [
-            LABEL_TO_IDX[label] for label in labels if label in LABEL_TO_IDX
-        ]
+        for wav_file in wav_files:
+            # Corresponding label file
+            label_file = wav_file.with_suffix(".txt")
 
-        # Create record
-        record = {
-            "filepath": str(wav_file.resolve()),
-            "labels": labels,
-            "label_indices": label_indices,
-            "filename": wav_file.name,
-        }
+            if not label_file.exists():
+                print(f"Warning: Label file not found for {wav_file.name}")
+                continue
 
-        records.append(record)
+            # Parse labels
+            labels = parse_test_labels(label_file)
+
+            # Convert to indices
+            label_indices = [
+                LABEL_TO_IDX[label] for label in labels if label in LABEL_TO_IDX
+            ]
+
+            # Create record
+            record = {
+                "filepath": str(wav_file.resolve()),
+                "labels": labels,
+                "label_indices": label_indices,
+                "filename": wav_file.name,
+                "part": part_num,
+            }
+
+            records.append(record)
+
+    if not records:
+        raise ValueError(
+            f"No audio files found in any test directories under {data_dir}"
+        )
 
     # Create DataFrame
     df = pd.DataFrame(records)

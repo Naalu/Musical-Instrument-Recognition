@@ -1,3 +1,74 @@
-# Directories #
-IRMAS-Data
-IRMAS-Sample
+# Edit .gitignore
+nano .gitignore
+```
+
+**Replace/add this content** (make sure these lines are there):
+```
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environments
+.venv/
+venv/
+ENV/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Jupyter Notebooks
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# Data (too large for Git)
+data/raw/
+data/cache/
+*.wav
+*.mp3
+*.flac
+
+# Outputs
+outputs/
+*.pth
+*.pt
+*.ckpt
+*.h5
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Exploration (keep small examples only)
+exploration/IRMAS-Training-Spec/
+exploration/IRMAS-Sample/*.wav
