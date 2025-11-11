@@ -24,9 +24,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 
 from src.core.config import load_config
-from src.core.device import get_device
 from src.core.paths import get_data_dir
-from src.core.seed import set_seed
 from src.data.dataset import (
     IRMASDataset,
     create_stratified_train_val_split,
@@ -34,6 +32,8 @@ from src.data.dataset import (
 )
 from src.models.densenet import create_densenet121, print_model_summary
 from src.train.trainer import Trainer
+from src.utils.device import select_device
+from src.utils.seed import set_seed
 
 
 def parse_args():
@@ -71,12 +71,12 @@ def main():
     print()
 
     # Set random seed
-    set_seed(config["training"]["random_seed"])
+    set_seed(config["train"]["random_seed"])
     print(f"Random seed: {config['train']['random_seed']}")
     print()
 
     # Get device
-    device = args.device if args.device else get_device()
+    device = args.device if args.device else select_device()
     print(f"Using device: {device}")
     print()
 
@@ -91,7 +91,7 @@ def main():
     train_indices, val_indices = create_stratified_train_val_split(
         train_dir,
         val_ratio=config["data"]["val_split"],
-        random_seed=config["training"]["random_seed"],
+        random_seed=config["train"]["random_seed"],
     )
 
     # Create datasets
@@ -116,17 +116,17 @@ def main():
     # Create data loaders
     train_loader = DataLoader(
         train_dataset,
-        batch_size=config["training"]["batch_size"],
+        batch_size=config["train"]["batch_size"],
         shuffle=True,
-        num_workers=config["training"]["num_workers"],
+        num_workers=config["train"]["num_workers"],
         pin_memory=True if device != "cpu" else False,
     )
 
     val_loader = DataLoader(
         val_dataset,
-        batch_size=config["training"]["batch_size"],
+        batch_size=config["train"]["batch_size"],
         shuffle=False,
-        num_workers=config["training"]["num_workers"],
+        num_workers=config["train"]["num_workers"],
         pin_memory=True if device != "cpu" else False,
     )
 
@@ -150,7 +150,7 @@ def main():
     print()
 
     # Create loss function
-    if config["training"]["use_class_weights"]:
+    if config["train"]["use_class_weights"]:
         print("Computing class weights...")
         class_weights = get_class_weights(train_dataset)
         criterion = nn.CrossEntropyLoss(weight=class_weights.to(device))
@@ -163,8 +163,8 @@ def main():
     # Create optimizer
     optimizer = torch.optim.Adam(
         model.parameters(),
-        lr=config["training"]["learning_rate"],
-        weight_decay=config["training"]["weight_decay"],
+        lr=config["train"]["learning_rate"],
+        weight_decay=config["train"]["weight_decay"],
     )
 
     print("Optimizer: Adam")
@@ -200,7 +200,7 @@ def main():
         scheduler=scheduler,
         device=device,
         checkpoint_dir=config["paths"]["checkpoint_dir"],
-        patience=config["training"]["early_stopping_patience"],
+        patience=config["train"]["early_stopping_patience"],
     )
 
     print()
@@ -213,8 +213,8 @@ def main():
 
     # Train
     history = trainer.train(
-        num_epochs=config["training"]["num_epochs"],
-        save_every=config["training"]["save_every"],
+        num_epochs=config["train"]["num_epochs"],
+        save_every=config["train"]["save_every"],
     )
 
     print("\n" + "=" * 70)
