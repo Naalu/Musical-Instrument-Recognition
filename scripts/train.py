@@ -114,12 +114,14 @@ def main():
     )
 
     # Create data loaders
+    use_pin_memory = device == "cuda"  # Only use on CUDA, not MPS or CPU
+
     train_loader = DataLoader(
         train_dataset,
         batch_size=config["train"]["batch_size"],
         shuffle=True,
         num_workers=config["train"]["num_workers"],
-        pin_memory=True if device != "cpu" else False,
+        pin_memory=use_pin_memory,
     )
 
     val_loader = DataLoader(
@@ -127,7 +129,7 @@ def main():
         batch_size=config["train"]["batch_size"],
         shuffle=False,
         num_workers=config["train"]["num_workers"],
-        pin_memory=True if device != "cpu" else False,
+        pin_memory=use_pin_memory,
     )
 
     print("\nDataLoaders created:")
