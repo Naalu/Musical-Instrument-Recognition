@@ -14,7 +14,7 @@ def test_load_baseline_config():
     """Test loading the baseline config."""
     print("Testing: load_config()")
 
-    config_path = project_root / "configs" / "experiment.baseline.yml"
+    config_path = project_root / "configs" / "baseline.yml"
     config = load_config(config_path)
 
     print(f"  ✓ Loaded config from: {config_path}")

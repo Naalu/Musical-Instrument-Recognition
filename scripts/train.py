@@ -33,7 +33,7 @@ from src.data.dataset import (
     get_class_weights,
 )
 from src.models.densenet import create_densenet121, print_model_summary
-from src.training.trainer import Trainer
+from src.train.trainer import Trainer
 
 
 def parse_args():
@@ -72,7 +72,7 @@ def main():
 
     # Set random seed
     set_seed(config["training"]["random_seed"])
-    print(f"Random seed: {config['training']['random_seed']}")
+    print(f"Random seed: {config['train']['random_seed']}")
     print()
 
     # Get device
@@ -168,8 +168,8 @@ def main():
     )
 
     print("Optimizer: Adam")
-    print(f"  Learning rate: {config['training']['learning_rate']}")
-    print(f"  Weight decay: {config['training']['weight_decay']}")
+    print(f"  Learning rate: {config['train']['learning_rate']}")
+    print(f"  Weight decay: {config['train']['weight_decay']}")
     print()
 
     # Create learning rate scheduler

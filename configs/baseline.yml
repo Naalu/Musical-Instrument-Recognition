@@ -1,48 +1,116 @@
 # IRMAS Musical Instrument Classification - Baseline Configuration
 # DenseNet121 with transfer learning from ImageNet
 
+# Experiment metadata
+experiment:
+  name: "baseline_densenet121"
+  description: "DenseNet121 baseline with no augmentation"
+  seed: 42
+
 # Paths
 paths:
   data_dir: "data/raw"
   checkpoint_dir: "checkpoints"
   log_dir: "logs"
 
+# Data configuration
+data:
+  sample_rate: 22050
+  num_classes: 11
+  classes:
+    - "cel"  # cello
+    - "cla"  # clarinet
+    - "flu"  # flute
+    - "gac"  # acoustic guitar
+    - "gel"  # electric guitar
+    - "org"  # organ
+    - "pia"  # piano
+    - "sax"  # saxophone
+    - "tru"  # trumpet
+    - "vio"  # violin
+    - "voi"  # voice
+  
+  # Data split (artist-level to prevent leakage)
+  val_split: 0.15  # 15% for validation
+  test_split: 0.0  # Test set is separate (IRMAS-TestingData)
+  split_by_artist: true  # Prevent artist leakage
+
 # Audio preprocessing
 audio:
   sample_rate: 22050  # Target sample rate (Hz)
   duration: 3.0       # IRMAS samples are 3 seconds
+  channels: 1         # mono
 
 # Feature extraction
 features:
+  type: "logmel"
   n_mels: 128         # Number of mel frequency bands
   n_fft: 2048         # FFT window size
   hop_length: 512     # Hop length for STFT
   fmin: 0.0           # Minimum frequency (Hz)
-  fmax: 11025         # Maximum frequency (Hz) - Nyquist
+  fmax: 11025         # Maximum frequency (Hz) - Nyquist (sr/2)
+  window: "hann"
+  power: 2.0          # For power spectrogram
+  normalization: "standard"  # per-sample standardization
+
+# Data augmentation
+augment:
+  enabled: false      # NO augmentation for baseline
+  pitch_shift:
+    enabled: false
+  time_stretch:
+    enabled: false
+  spec_augment:
+    enabled: false
 
 # Model architecture
 model:
+  architecture: "densenet121"
   name: "densenet121"
   pretrained: true    # Use ImageNet pretrained weights
   dropout: 0.5        # Dropout rate before classifier
+  num_classes: 11
+  input_height: 128   # Must match features.n_mels
 
 # Training
-training:
+train:
   num_epochs: 50
   batch_size: 32
   learning_rate: 0.0001  # 1e-4
+  optimizer: "adam"
   weight_decay: 0.0001   # L2 regularization
   random_seed: 42
   num_workers: 4         # DataLoader workers
+  
+  # Learning rate schedule
+  lr_scheduler: "reduce_on_plateau"
+  lr_patience: 5
+  lr_factor: 0.5
+  
+  # Early stopping
+  early_stopping: true
   early_stopping_patience: 10
+  patience: 10
   save_every: 5          # Save checkpoint every N epochs
-  use_class_weights: true  # Handle class imbalance
+  
+  # Class weighting (for imbalanced dataset)
+  use_class_weights: true
 
-# Data splitting
-data:
-  val_split: 0.15      # 15% for validation
-  test_split: 0.0      # Test set is separate (IRMAS-TestingData)
+# Evaluation metrics
+eval:
+  primary_metric: "macro_f1"
+  metrics:
+    - "accuracy"
+    - "macro_f1"
+    - "per_class_f1"
+    - "confusion_matrix"
 
 # Target performance
 target:
   macro_f1: 0.60       # Target macro F1-score
+
+# Inference (for test set evaluation)
+inference:
+  window_size: 3.0     # seconds
+  overlap: 0.5         # 50% overlap
+  aggregation: "max"   # max pooling for multi-window predictions
