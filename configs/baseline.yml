@@ -1,0 +1,48 @@
+# IRMAS Musical Instrument Classification - Baseline Configuration
+# DenseNet121 with transfer learning from ImageNet
+
+# Paths
+paths:
+  data_dir: "data/raw"
+  checkpoint_dir: "checkpoints"
+  log_dir: "logs"
+
+# Audio preprocessing
+audio:
+  sample_rate: 22050  # Target sample rate (Hz)
+  duration: 3.0       # IRMAS samples are 3 seconds
+
+# Feature extraction
+features:
+  n_mels: 128         # Number of mel frequency bands
+  n_fft: 2048         # FFT window size
+  hop_length: 512     # Hop length for STFT
+  fmin: 0.0           # Minimum frequency (Hz)
+  fmax: 11025         # Maximum frequency (Hz) - Nyquist
+
+# Model architecture
+model:
+  name: "densenet121"
+  pretrained: true    # Use ImageNet pretrained weights
+  dropout: 0.5        # Dropout rate before classifier
+
+# Training
+training:
+  num_epochs: 50
+  batch_size: 32
+  learning_rate: 0.0001  # 1e-4
+  weight_decay: 0.0001   # L2 regularization
+  random_seed: 42
+  num_workers: 4         # DataLoader workers
+  early_stopping_patience: 10
+  save_every: 5          # Save checkpoint every N epochs
+  use_class_weights: true  # Handle class imbalance
+
+# Data splitting
+data:
+  val_split: 0.15      # 15% for validation
+  test_split: 0.0      # Test set is separate (IRMAS-TestingData)
+
+# Target performance
+target:
+  macro_f1: 0.60       # Target macro F1-score
