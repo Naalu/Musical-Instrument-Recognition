@@ -140,6 +140,68 @@ class DenseNet121Classifier(nn.Module):
             param.requires_grad = True
         print("Unfroze feature extractor - full model will be trained")
 
+    def unfreeze_last_layers(self, num_blocks: int = 2):
+        """Unfreeze only the last N dense blocks.
+
+        DenseNet121 has 4 dense blocks. Unfreezing the last 2 blocks
+        (denseblock3 and denseblock4) gives fine-tuning capability
+        while keeping early generic features frozen.
+
+        Args:
+            num_blocks: Number of final dense blocks to unfreeze (1-4).
+                - 1: Only denseblock4 (~15% of params)
+                - 2: denseblock3 + denseblock4 (~30% of params)
+                - 3: denseblock2 + denseblock3 + denseblock4 (~50% of params)
+                - 4: Unfreeze all (same as unfreeze_features())
+
+        Example:
+            >>> model = create_densenet121(pretrained=True)
+            >>> model.freeze_features()  # Freeze all
+            >>> model.unfreeze_last_layers(num_blocks=2)  # Unfreeze last 30%
+        """
+        # DenseNet121 structure in features module:
+        # conv0, norm0, relu0, pool0,
+        # denseblock1, transition1,
+        # denseblock2, transition2,
+        # denseblock3, transition3,
+        # denseblock4, norm5
+
+        # Freeze everything first
+        for param in self.features.parameters():
+            param.requires_grad = False
+
+        # Map num_blocks to layers to unfreeze
+        if num_blocks >= 4:
+            # Unfreeze everything (same as unfreeze_features)
+            for param in self.features.parameters():
+                param.requires_grad = True
+            print("Unfroze all feature extractor layers")
+            return
+
+        # Get layer names to unfreeze based on num_blocks
+        layers_to_unfreeze = []
+
+        if num_blocks >= 1:
+            layers_to_unfreeze.extend(["denseblock4", "norm5"])
+        if num_blocks >= 2:
+            layers_to_unfreeze.extend(["denseblock3", "transition3"])
+        if num_blocks >= 3:
+            layers_to_unfreeze.extend(["denseblock2", "transition2"])
+
+        # Unfreeze specified layers
+        for name, module in self.features.named_children():
+            if name in layers_to_unfreeze:
+                for param in module.parameters():
+                    param.requires_grad = True
+
+        # Count trainable params
+        trainable = sum(p.numel() for p in self.parameters() if p.requires_grad)
+        total = sum(p.numel() for p in self.parameters())
+        percent = 100 * trainable / total
+
+        print(f"Unfroze last {num_blocks} dense block(s): {layers_to_unfreeze}")
+        print(f"Trainable: {trainable:,} / {total:,} parameters ({percent:.1f}%)")
+
 
 def create_densenet121(
     num_classes: int = 11,
