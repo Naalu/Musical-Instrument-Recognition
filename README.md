@@ -168,7 +168,7 @@ Musical-Instrument-Recognition/
 4. **Transfer learning**: Two-stage training preserves ImageNet features
 5. **MPS acceleration**: Both CUDA and Native Apple Silicon Metal Performance Shader support
 
-## 🎯 Future Improvements
+## Future Improvements
 
 To reach 60%+ F1-score:
 
@@ -177,7 +177,7 @@ To reach 60%+ F1-score:
 - [ ] **Better architecture**: Try EfficientNet, ResNet variants
 - [ ] **Longer training**: More epochs with early stopping
 
-## 📚 References
+## References
 
 1. **IRMAS Dataset**: Bosch et al. (2012) "A Dataset for Instrument Recognition in Polyphonic Music"
 2. **DenseNet**: Huang et al. (2017) "Densely Connected Convolutional Networks"
