@@ -2,7 +2,7 @@
 
 Deep learning system for classifying musical instruments from audio using DenseNet121 and mel-spectrograms on the IRMAS dataset.
 
-## 🎯 Project Overview
+## Project Overview
 
 This project implements a **production-ready deep learning pipeline** for musical instrument classification, achieving **59.25% macro F1-score** on the IRMAS dataset using transfer learning with DenseNet121.
 
