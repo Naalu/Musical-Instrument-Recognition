@@ -169,7 +169,7 @@ class Trainer:
             val_metrics = self.validate()
 
             if self.scheduler is not None:
-                self.scheduler.step()
+                self.scheduler.step(val_metrics["macro_f1"])
 
             current_lr = self.optimizer.param_groups[0]["lr"]
 
