@@ -14,7 +14,7 @@ This project implements a **production-ready deep learning pipeline** for musica
 - **Training**: Two-stage approach with selective layer unfreezing
 - **Hardware**: Apple M1 Pro with MPS acceleration
 
-## 🏗️ Architecture
+## Architecture
 
 - **Input**: 3-second audio clips → Log-mel spectrograms (128 bands × 130 frames)
 - **Model**: DenseNet121 with custom classifier head
@@ -24,7 +24,7 @@ This project implements a **production-ready deep learning pipeline** for musica
 - **Optimization**: Adam optimizer with ReduceLROnPlateau scheduler
 - **Loss**: Weighted CrossEntropyLoss (handles class imbalance)
 
-## 📊 Dataset
+## Dataset
 
 **IRMAS (Instrument Recognition in Musical Audio Signals)**
 
@@ -34,7 +34,7 @@ This project implements a **production-ready deep learning pipeline** for musica
 - Sample rate: 44.1 kHz → 22.05 kHz
 - Audio format: WAV, 16-bit
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Installation
 
