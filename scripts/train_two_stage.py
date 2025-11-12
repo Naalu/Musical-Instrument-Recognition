@@ -19,9 +19,7 @@ import torch.nn as nn
 from torch.utils.data import DataLoader
 
 from src.core.config import load_config
-from src.core.device import get_device
 from src.core.paths import get_data_dir
-from src.core.seed import set_seed
 from src.data.dataset import (
     IRMASDataset,
     create_stratified_train_val_split,
@@ -33,6 +31,8 @@ from src.models.densenet import (
     print_model_summary,
 )
 from src.train.trainer import Trainer
+from src.utils.device import select_device
+from src.utils.seed import set_seed
 
 
 def parse_args():
@@ -76,7 +76,7 @@ def main():
 
     config = load_config(args.config)
     set_seed(config["train"]["random_seed"])
-    device = get_device()
+    device = select_device()
 
     print(f"Device: {device}")
     print()
