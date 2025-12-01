@@ -1,568 +1,389 @@
-"""Training script with configurable data augmentation for ablation studies.
+"""Augmented PyTorch Dataset for IRMAS with configurable data augmentation.
 
-This script supports running ablation experiments to measure the impact of
-each augmentation technique independently and in combination.
+This module provides a dataset class that supports three types of augmentation:
+1. Pitch shifting (applied to raw audio)
+2. Time stretching (applied to raw audio)
+3. SpecAugment (applied to mel-spectrogram)
 
-Ablation Experiments:
-    python scripts/train_augmented.py --no-augment      # Baseline (no aug)
-    python scripts/train_augmented.py --pitch-only      # Pitch shift only
-    python scripts/train_augmented.py --stretch-only    # Time stretch only
-    python scripts/train_augmented.py --specaug-only    # SpecAugment only
-    python scripts/train_augmented.py --full-augment    # All augmentations
-
-Two-Stage Training (recommended):
-    python scripts/train_augmented.py --full-augment --two-stage
+The augmentations can be enabled/disabled independently for ablation studies.
 
 Example:
-    # Full augmentation with two-stage training
-    python scripts/train_augmented.py --full-augment --two-stage
-
-    # Quick test (2 epochs)
-    python scripts/train_augmented.py --specaug-only --epochs 2
+    >>> # Full augmentation
+    >>> dataset = AugmentedIRMASDataset(
+    ...     data_dir='data/raw/IRMAS-TrainingData',
+    ...     augment_pitch=True,
+    ...     augment_stretch=True,
+    ...     augment_specaug=True,
+    ... )
+    >>>
+    >>> # SpecAugment only (for ablation)
+    >>> dataset = AugmentedIRMASDataset(
+    ...     data_dir='data/raw/IRMAS-TrainingData',
+    ...     augment_pitch=False,
+    ...     augment_stretch=False,
+    ...     augment_specaug=True,
+    ... )
 """
 
-import argparse
-import sys
-from datetime import datetime
 from pathlib import Path
+from typing import List, Optional, Tuple
 
-# Add project root to path
-project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root))
-
+import numpy as np
 import torch
-import torch.nn as nn
-from torch.utils.data import DataLoader
+from torch.utils.data import Dataset
 
-from src.core.config import load_config
-from src.core.paths import get_data_dir
-from src.data.augmented_dataset import AugmentedIRMASDataset
-from src.data.dataset import (
-    IRMASDataset,
-    create_stratified_train_val_split,
-    get_class_weights,
-)
-from src.models.densenet import count_parameters, create_densenet121
-from src.train.trainer import Trainer
-from src.utils.device import select_device
-from src.utils.seed import set_seed
+from src.audio.io import load_audio
+from src.augment.pitch import random_pitch_shift
+from src.augment.specaugment import random_spec_augment
+from src.augment.stretch import random_time_stretch
+from src.data.irmas import IRMAS_CLASSES, index_training_data
+from src.features.extraction import extract_melspectrogram
 
 
-def parse_args():
-    """Parse command line arguments."""
-    parser = argparse.ArgumentParser(
-        description="Train IRMAS classifier with configurable augmentation",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Ablation Study Examples:
-  %(prog)s --no-augment        # Baseline (no augmentation)
-  %(prog)s --pitch-only        # Only pitch shifting
-  %(prog)s --stretch-only      # Only time stretching
-  %(prog)s --specaug-only      # Only SpecAugment
-  %(prog)s --full-augment      # All augmentations combined
+class AugmentedIRMASDataset(Dataset):
+    """PyTorch Dataset for IRMAS with configurable augmentation.
 
-Two-Stage Training (recommended for best results):
-  %(prog)s --full-augment --two-stage
-        """,
-    )
+    This dataset loads raw audio, applies audio-level augmentations
+    (pitch shift, time stretch), extracts mel-spectrograms, and then
+    applies spectrogram-level augmentation (SpecAugment).
 
-    # Augmentation presets (mutually exclusive)
-    aug_group = parser.add_mutually_exclusive_group(required=True)
-    aug_group.add_argument(
-        "--no-augment",
-        action="store_true",
-        help="No augmentation (baseline)",
-    )
-    aug_group.add_argument(
-        "--pitch-only",
-        action="store_true",
-        help="Only pitch shifting augmentation",
-    )
-    aug_group.add_argument(
-        "--stretch-only",
-        action="store_true",
-        help="Only time stretching augmentation",
-    )
-    aug_group.add_argument(
-        "--specaug-only",
-        action="store_true",
-        help="Only SpecAugment (frequency/time masking)",
-    )
-    aug_group.add_argument(
-        "--full-augment",
-        action="store_true",
-        help="All augmentations (pitch + stretch + SpecAugment)",
-    )
-    aug_group.add_argument(
-        "--custom",
-        action="store_true",
-        help="Custom augmentation (use --pitch, --stretch, --specaug flags)",
-    )
+    The augmentation pipeline is:
+        Raw Audio → [Pitch Shift] → [Time Stretch] → Mel-Spectrogram → [SpecAugment]
 
-    # Custom augmentation flags (used with --custom)
-    parser.add_argument(
-        "--pitch", action="store_true", help="Enable pitch shift (with --custom)"
-    )
-    parser.add_argument(
-        "--stretch", action="store_true", help="Enable time stretch (with --custom)"
-    )
-    parser.add_argument(
-        "--specaug", action="store_true", help="Enable SpecAugment (with --custom)"
-    )
+    Each augmentation can be independently enabled/disabled for ablation studies.
 
-    # Training configuration
-    parser.add_argument(
-        "--config",
-        type=str,
-        default="configs/baseline.yml",
-        help="Path to base config file (default: configs/baseline.yml)",
-    )
-    parser.add_argument(
-        "--epochs",
-        type=int,
-        default=None,
-        help="Number of training epochs (overrides config)",
-    )
-    parser.add_argument(
-        "--two-stage",
-        action="store_true",
-        help="Use two-stage training (freeze then fine-tune)",
-    )
-    parser.add_argument(
-        "--stage1-epochs",
-        type=int,
-        default=5,
-        help="Epochs for stage 1 - frozen features (default: 5)",
-    )
-    parser.add_argument(
-        "--stage2-epochs",
-        type=int,
-        default=45,
-        help="Epochs for stage 2 - fine-tuning (default: 45)",
-    )
-    parser.add_argument(
-        "--stage2-lr",
-        type=float,
-        default=1e-5,
-        help="Learning rate for stage 2 (default: 1e-5)",
-    )
-    parser.add_argument(
-        "--batch-size",
-        type=int,
-        default=None,
-        help="Batch size (overrides config)",
-    )
-    parser.add_argument(
-        "--lr",
-        type=float,
-        default=None,
-        help="Learning rate (overrides config)",
-    )
-    parser.add_argument(
-        "--seed",
-        type=int,
-        default=42,
-        help="Random seed (default: 42)",
-    )
-    parser.add_argument(
-        "--experiment-name",
-        type=str,
-        default=None,
-        help="Name for this experiment (auto-generated if not provided)",
-    )
+    Attributes:
+        data_dir: Path to IRMAS-TrainingData directory.
+        augment_pitch: Whether to apply pitch shifting.
+        augment_stretch: Whether to apply time stretching.
+        augment_specaug: Whether to apply SpecAugment.
+        target_sr: Target sample rate for audio.
+        n_mels: Number of mel frequency bands.
+        num_classes: Number of instrument classes (11).
+    """
 
-    return parser.parse_args()
+    def __init__(
+        self,
+        data_dir: str | Path,
+        # Augmentation toggles (for ablation studies)
+        augment_pitch: bool = False,
+        augment_stretch: bool = False,
+        augment_specaug: bool = False,
+        # Pitch shift parameters
+        pitch_shift_max_steps: float = 2.0,
+        pitch_shift_probability: float = 0.5,
+        # Time stretch parameters
+        time_stretch_rate_range: Tuple[float, float] = (0.8, 1.2),
+        time_stretch_probability: float = 0.5,
+        # SpecAugment parameters
+        specaug_freq_mask_max: int = 27,
+        specaug_time_mask_max: int = 40,
+        specaug_num_freq_masks: int = 2,
+        specaug_num_time_masks: int = 2,
+        specaug_probability: float = 0.8,
+        # Audio/feature parameters
+        target_sr: int = 22050,
+        n_mels: int = 128,
+        n_fft: int = 2048,
+        hop_length: int = 512,
+        # Dataset subset
+        indices: Optional[List[int]] = None,
+    ):
+        """Initialize augmented IRMAS dataset.
+
+        Args:
+            data_dir: Path to IRMAS-TrainingData directory.
+            augment_pitch: Enable pitch shifting (default: False).
+            augment_stretch: Enable time stretching (default: False).
+            augment_specaug: Enable SpecAugment (default: False).
+            pitch_shift_max_steps: Max semitones for pitch shift (default: 2.0).
+            pitch_shift_probability: Probability of pitch shift (default: 0.5).
+            time_stretch_rate_range: Rate range for stretch (default: (0.8, 1.2)).
+            time_stretch_probability: Probability of stretch (default: 0.5).
+            specaug_freq_mask_max: Max frequency mask size (default: 27).
+            specaug_time_mask_max: Max time mask size (default: 40).
+            specaug_num_freq_masks: Number of frequency masks (default: 2).
+            specaug_num_time_masks: Number of time masks (default: 2).
+            specaug_probability: Probability of SpecAugment (default: 0.8).
+            target_sr: Target sample rate (default: 22050).
+            n_mels: Number of mel bands (default: 128).
+            n_fft: FFT window size (default: 2048).
+            hop_length: Hop length (default: 512).
+            indices: Optional list of indices for train/val split.
+        """
+        self.data_dir = Path(data_dir)
+
+        # Store augmentation settings
+        self.augment_pitch = augment_pitch
+        self.augment_stretch = augment_stretch
+        self.augment_specaug = augment_specaug
+
+        # Pitch shift parameters
+        self.pitch_shift_max_steps = pitch_shift_max_steps
+        self.pitch_shift_probability = pitch_shift_probability
+
+        # Time stretch parameters
+        self.time_stretch_rate_range = time_stretch_rate_range
+        self.time_stretch_probability = time_stretch_probability
+
+        # SpecAugment parameters
+        self.specaug_freq_mask_max = specaug_freq_mask_max
+        self.specaug_time_mask_max = specaug_time_mask_max
+        self.specaug_num_freq_masks = specaug_num_freq_masks
+        self.specaug_num_time_masks = specaug_num_time_masks
+        self.specaug_probability = specaug_probability
+
+        # Audio/feature parameters
+        self.target_sr = target_sr
+        self.n_mels = n_mels
+        self.n_fft = n_fft
+        self.hop_length = hop_length
+
+        # Calculate expected number of samples for 3-second audio
+        self.target_duration = 3.0  # IRMAS training clips are 3 seconds
+        self.target_samples = int(self.target_sr * self.target_duration)
+
+        # Index the dataset
+        self.dataframe = index_training_data(self.data_dir)
+
+        # Filter by indices if provided (for train/val split)
+        if indices is not None:
+            self.dataframe = self.dataframe.iloc[indices].reset_index(drop=True)
+
+        self.num_classes = len(IRMAS_CLASSES)
+
+        # Print configuration summary
+        self._print_config()
+
+    def _print_config(self):
+        """Print dataset configuration summary."""
+        print("=" * 60)
+        print("AugmentedIRMASDataset initialized")
+        print("=" * 60)
+        print(f"  Samples: {len(self.dataframe)}")
+        print(f"  Classes: {self.num_classes}")
+        print(f"  Target SR: {self.target_sr}Hz")
+        print(f"  Mel bands: {self.n_mels}")
+        print()
+        print("Augmentation settings:")
+        print(f"  Pitch shift:  {'✓ ENABLED' if self.augment_pitch else '✗ disabled'}")
+        if self.augment_pitch:
+            print(f"    - Max steps: ±{self.pitch_shift_max_steps} semitones")
+            print(f"    - Probability: {self.pitch_shift_probability}")
+        print(
+            f"  Time stretch: {'✓ ENABLED' if self.augment_stretch else '✗ disabled'}"
+        )
+        if self.augment_stretch:
+            print(f"    - Rate range: {self.time_stretch_rate_range}")
+            print(f"    - Probability: {self.time_stretch_probability}")
+        print(
+            f"  SpecAugment:  {'✓ ENABLED' if self.augment_specaug else '✗ disabled'}"
+        )
+        if self.augment_specaug:
+            print(
+                f"    - Freq masks: {self.specaug_num_freq_masks} (max {self.specaug_freq_mask_max})"
+            )
+            print(
+                f"    - Time masks: {self.specaug_num_time_masks} (max {self.specaug_time_mask_max})"
+            )
+            print(f"    - Probability: {self.specaug_probability}")
+        print("=" * 60)
+
+    def __len__(self) -> int:
+        """Return number of samples in dataset."""
+        return len(self.dataframe)
+
+    def _pad_or_crop_audio(self, audio: np.ndarray) -> np.ndarray:
+        """Ensure audio is exactly target_samples long.
+
+        Time stretching changes audio length, so we need to pad or crop
+        to maintain consistent input size for the model.
+
+        Args:
+            audio: Input audio array.
+
+        Returns:
+            Audio array of exactly target_samples length.
+        """
+        current_length = len(audio)
+
+        if current_length == self.target_samples:
+            return audio
+        elif current_length > self.target_samples:
+            # Crop from center (keeps the middle portion)
+            start = (current_length - self.target_samples) // 2
+            return audio[start : start + self.target_samples]
+        else:
+            # Pad with zeros (silence) at the end
+            padding = self.target_samples - current_length
+            return np.pad(audio, (0, padding), mode="constant", constant_values=0)
+
+    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, int]:
+        """Get a single sample with augmentation applied.
+
+        Augmentation pipeline:
+        1. Load raw audio
+        2. Apply pitch shift (if enabled)
+        3. Apply time stretch (if enabled)
+        4. Pad/crop to fixed length (if time stretch was applied)
+        5. Extract mel-spectrogram
+        6. Apply SpecAugment (if enabled)
+        7. Convert to tensor
+
+        Args:
+            idx: Sample index.
+
+        Returns:
+            Tuple of (mel_spectrogram, label):
+            - mel_spectrogram: Tensor of shape (1, n_mels, time_frames)
+            - label: Integer class label (0-10)
+        """
+        # Get file info
+        row = self.dataframe.iloc[idx]
+        filepath = row["filepath"]
+        label = row["label_idx"]
+
+        # Step 1: Load raw audio
+        audio, sr = load_audio(filepath, target_sr=self.target_sr, mono=True)
+
+        # Step 2: Apply pitch shift (if enabled)
+        if self.augment_pitch:
+            audio = random_pitch_shift(
+                audio,
+                sr=self.target_sr,
+                max_steps=self.pitch_shift_max_steps,
+                probability=self.pitch_shift_probability,
+            )
+
+        # Step 3: Apply time stretch (if enabled)
+        if self.augment_stretch:
+            audio = random_time_stretch(
+                audio,
+                rate_range=self.time_stretch_rate_range,
+                probability=self.time_stretch_probability,
+            )
+            # Step 4: Ensure fixed length after stretching
+            audio = self._pad_or_crop_audio(audio)
+
+        # Step 5: Extract mel-spectrogram
+        melspec = extract_melspectrogram(
+            audio,
+            sample_rate=self.target_sr,
+            n_mels=self.n_mels,
+            n_fft=self.n_fft,
+            hop_length=self.hop_length,
+        )
+
+        # Step 6: Apply SpecAugment (if enabled)
+        if self.augment_specaug:
+            melspec = random_spec_augment(
+                melspec,
+                freq_mask_max=self.specaug_freq_mask_max,
+                time_mask_max=self.specaug_time_mask_max,
+                num_freq_masks=self.specaug_num_freq_masks,
+                num_time_masks=self.specaug_num_time_masks,
+                probability=self.specaug_probability,
+            )
+
+        # Step 7: Convert to tensor and add channel dimension
+        # Shape: (n_mels, time) -> (1, n_mels, time)
+        melspec_tensor = torch.from_numpy(melspec).float().unsqueeze(0)
+
+        return melspec_tensor, label
+
+    def get_class_distribution(self) -> dict:
+        """Get the distribution of classes in this dataset.
+
+        Returns:
+            Dictionary mapping class names to counts.
+        """
+        counts = self.dataframe["instrument"].value_counts().to_dict()
+        return counts
+
+    def get_augmentation_config(self) -> dict:
+        """Get the current augmentation configuration.
+
+        Useful for logging experiment settings.
+
+        Returns:
+            Dictionary with all augmentation parameters.
+        """
+        return {
+            "augment_pitch": self.augment_pitch,
+            "augment_stretch": self.augment_stretch,
+            "augment_specaug": self.augment_specaug,
+            "pitch_shift_max_steps": self.pitch_shift_max_steps,
+            "pitch_shift_probability": self.pitch_shift_probability,
+            "time_stretch_rate_range": self.time_stretch_rate_range,
+            "time_stretch_probability": self.time_stretch_probability,
+            "specaug_freq_mask_max": self.specaug_freq_mask_max,
+            "specaug_time_mask_max": self.specaug_time_mask_max,
+            "specaug_num_freq_masks": self.specaug_num_freq_masks,
+            "specaug_num_time_masks": self.specaug_num_time_masks,
+            "specaug_probability": self.specaug_probability,
+        }
 
 
-def get_augmentation_settings(args):
-    """Determine augmentation settings based on command line args.
+def create_augmented_datasets(
+    data_dir: str | Path,
+    train_indices: List[int],
+    val_indices: List[int],
+    augment_pitch: bool = True,
+    augment_stretch: bool = True,
+    augment_specaug: bool = True,
+    **kwargs,
+) -> Tuple[AugmentedIRMASDataset, "IRMASDataset"]:
+    """Create train (augmented) and validation (non-augmented) datasets.
+
+    This is a convenience function that creates:
+    - Training dataset WITH augmentation enabled
+    - Validation dataset WITHOUT augmentation (for fair evaluation)
+
+    Args:
+        data_dir: Path to IRMAS-TrainingData.
+        train_indices: Indices for training split.
+        val_indices: Indices for validation split.
+        augment_pitch: Enable pitch shift for training.
+        augment_stretch: Enable time stretch for training.
+        augment_specaug: Enable SpecAugment for training.
+        **kwargs: Additional arguments passed to dataset constructors.
 
     Returns:
-        Tuple of (augment_pitch, augment_stretch, augment_specaug, experiment_name)
+        Tuple of (train_dataset, val_dataset).
+
+    Example:
+        >>> train_idx, val_idx = create_stratified_train_val_split(data_dir)
+        >>> train_ds, val_ds = create_augmented_datasets(
+        ...     data_dir,
+        ...     train_idx,
+        ...     val_idx,
+        ...     augment_pitch=True,
+        ...     augment_stretch=True,
+        ...     augment_specaug=True,
+        ... )
     """
-    if args.no_augment:
-        return False, False, False, "baseline_no_aug"
-    elif args.pitch_only:
-        return True, False, False, "ablation_pitch_only"
-    elif args.stretch_only:
-        return False, True, False, "ablation_stretch_only"
-    elif args.specaug_only:
-        return False, False, True, "ablation_specaug_only"
-    elif args.full_augment:
-        return True, True, True, "full_augment"
-    elif args.custom:
-        name_parts = ["custom"]
-        if args.pitch:
-            name_parts.append("pitch")
-        if args.stretch:
-            name_parts.append("stretch")
-        if args.specaug:
-            name_parts.append("specaug")
-        return args.pitch, args.stretch, args.specaug, "_".join(name_parts)
-    else:
-        raise ValueError("No augmentation preset specified")
-
-
-def create_experiment_dir(experiment_name: str) -> Path:
-    """Create directory for experiment outputs."""
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    exp_dir = Path("outputs/runs") / f"{experiment_name}_{timestamp}"
-    exp_dir.mkdir(parents=True, exist_ok=True)
-    return exp_dir
-
-
-def main():
-    """Main training function."""
-    args = parse_args()
-
-    # Get augmentation settings
-    augment_pitch, augment_stretch, augment_specaug, auto_name = (
-        get_augmentation_settings(args)
-    )
-    experiment_name = args.experiment_name or auto_name
-
-    # Print header
-    print("=" * 70)
-    print("AUGMENTED TRAINING - ABLATION STUDY")
-    print("=" * 70)
-    print(f"Experiment: {experiment_name}")
-    print(
-        f"Augmentation: pitch={augment_pitch}, stretch={augment_stretch}, specaug={augment_specaug}"
-    )
-    if args.two_stage:
-        print(
-            f"Training: Two-stage (Stage 1: {args.stage1_epochs} epochs, Stage 2: {args.stage2_epochs} epochs)"
-        )
-    print()
-
-    # Load config
-    config = load_config(args.config)
-
-    # Set seed for reproducibility
-    seed = args.seed
-    set_seed(seed)
-
-    # Select device
-    device = select_device()
-    print(f"Device: {device}")
-    print(f"Seed: {seed}")
-    print()
-
-    # Create experiment directory
-    exp_dir = create_experiment_dir(experiment_name)
-    print(f"Output directory: {exp_dir}")
-    print()
-
-    # =========================================================================
-    # DATA LOADING
-    # =========================================================================
-    print("=" * 70)
-    print("LOADING DATA")
-    print("=" * 70)
-
-    train_dir = get_data_dir("raw") / "IRMAS-TrainingData"
-
-    # Create train/val split
-    train_indices, val_indices = create_stratified_train_val_split(
-        train_dir,
-        val_ratio=config["data"]["val_split"],
-        random_seed=seed,
-    )
-
-    # Feature extraction parameters
-    target_sr = config["audio"]["sample_rate"]
-    n_mels = config["features"]["n_mels"]
-    n_fft = config["features"]["n_fft"]
-    hop_length = config["features"]["hop_length"]
+    # Import here to avoid circular imports
+    from src.data.dataset import IRMASDataset
 
     # Training dataset WITH augmentation
-    print("\nCreating training dataset...")
     train_dataset = AugmentedIRMASDataset(
-        data_dir=train_dir,
+        data_dir=data_dir,
         augment_pitch=augment_pitch,
         augment_stretch=augment_stretch,
         augment_specaug=augment_specaug,
-        target_sr=target_sr,
-        n_mels=n_mels,
-        n_fft=n_fft,
-        hop_length=hop_length,
         indices=train_indices,
+        **kwargs,
     )
 
-    # Validation dataset WITHOUT augmentation (fair evaluation)
-    print("\nCreating validation dataset...")
+    # Validation dataset WITHOUT augmentation
+    # Use the original IRMASDataset for clean validation
     val_dataset = IRMASDataset(
-        data_dir=train_dir,
-        target_sr=target_sr,
-        n_mels=n_mels,
-        n_fft=n_fft,
-        hop_length=hop_length,
+        data_dir=data_dir,
         indices=val_indices,
+        target_sr=kwargs.get("target_sr", 22050),
+        n_mels=kwargs.get("n_mels", 128),
+        n_fft=kwargs.get("n_fft", 2048),
+        hop_length=kwargs.get("hop_length", 512),
     )
 
-    # Create data loaders
-    batch_size = args.batch_size or config["train"]["batch_size"]
-    num_workers = config.get("compute", {}).get("num_workers", 4)
-
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=batch_size,
-        shuffle=True,
-        num_workers=num_workers,
-        pin_memory=True,
-    )
-
-    val_loader = DataLoader(
-        val_dataset,
-        batch_size=batch_size,
-        shuffle=False,
-        num_workers=num_workers,
-        pin_memory=True,
-    )
-
-    print(f"\nTrain batches: {len(train_loader)}")
-    print(f"Val batches: {len(val_loader)}")
-
-    # Get class weights for handling imbalance
-    # Need to use non-augmented dataset for weight calculation
-    temp_dataset = IRMASDataset(data_dir=train_dir, indices=train_indices)
-    class_weights = get_class_weights(temp_dataset).to(device)
-
-    # =========================================================================
-    # MODEL
-    # =========================================================================
-    print("\n" + "=" * 70)
-    print("MODEL")
-    print("=" * 70)
-
-    model = create_densenet121(
-        num_classes=config["model"]["num_classes"],
-        pretrained=config["model"]["pretrained"],
-        dropout=config["model"]["dropout"],
-    )
-
-    total_params, trainable_params = count_parameters(model)
-    print(f"Total parameters: {total_params:,}")
-    print(f"Trainable parameters: {trainable_params:,}")
-
-    model = model.to(device)
-
-    # Loss function with class weights
-    criterion = nn.CrossEntropyLoss(weight=class_weights)
-
-    # =========================================================================
-    # TRAINING
-    # =========================================================================
-    print("\n" + "=" * 70)
-    print("TRAINING")
-    print("=" * 70)
-
-    if args.two_stage:
-        # Two-stage training
-        history = train_two_stage(
-            model=model,
-            train_loader=train_loader,
-            val_loader=val_loader,
-            criterion=criterion,
-            device=device,
-            exp_dir=exp_dir,
-            config=config,
-            args=args,
-        )
-    else:
-        # Single-stage training
-        history = train_single_stage(
-            model=model,
-            train_loader=train_loader,
-            val_loader=val_loader,
-            criterion=criterion,
-            device=device,
-            exp_dir=exp_dir,
-            config=config,
-            args=args,
-        )
-
-    # =========================================================================
-    # RESULTS
-    # =========================================================================
-    print("\n" + "=" * 70)
-    print("TRAINING COMPLETE")
-    print("=" * 70)
-    print(f"Experiment: {experiment_name}")
-    print(f"Best validation F1: {history['best_val_f1']:.4f}")
-    print(f"Best epoch: {history['best_epoch']}")
-    print(f"Checkpoint saved to: {exp_dir / 'best_model.pth'}")
-    print()
-
-    # Save experiment summary
-    save_experiment_summary(
-        exp_dir,
-        experiment_name,
-        args,
-        history,
-        augment_pitch,
-        augment_stretch,
-        augment_specaug,
-    )
-
-    return history
-
-
-def train_single_stage(
-    model, train_loader, val_loader, criterion, device, exp_dir, config, args
-):
-    """Single-stage training (all parameters trainable)."""
-    lr = args.lr or config["train"]["learning_rate"]
-    epochs = args.epochs or config["train"]["num_epochs"]
-    patience = config["train"]["early_stopping"]["patience"]
-
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=1e-4)
-
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode="max", factor=0.5, patience=5, verbose=True
-    )
-
-    trainer = Trainer(
-        model=model,
-        train_loader=train_loader,
-        val_loader=val_loader,
-        criterion=criterion,
-        optimizer=optimizer,
-        scheduler=scheduler,
-        device=device,
-        checkpoint_dir=str(exp_dir),
-        patience=patience,
-    )
-
-    print(f"Training for {epochs} epochs (patience={patience})")
-    print(f"Learning rate: {lr}")
-    print()
-
-    history = trainer.train(num_epochs=epochs)
-
-    return history
-
-
-def train_two_stage(
-    model, train_loader, val_loader, criterion, device, exp_dir, config, args
-):
-    """Two-stage training with feature freezing."""
-    stage1_epochs = args.stage1_epochs
-    stage2_epochs = args.stage2_epochs
-    stage1_lr = args.lr or config["train"]["learning_rate"]
-    stage2_lr = args.stage2_lr
-    patience = config["train"]["early_stopping"]["patience"]
-
-    # -------------------------------------------------------------------------
-    # Stage 1: Frozen backbone, train classifier only
-    # -------------------------------------------------------------------------
-    print("-" * 50)
-    print(f"STAGE 1: Train classifier head ({stage1_epochs} epochs)")
-    print("-" * 50)
-
-    model.freeze_features()
-    _, trainable = count_parameters(model)
-    print(f"Trainable parameters: {trainable:,}")
-
-    optimizer1 = torch.optim.Adam(
-        filter(lambda p: p.requires_grad, model.parameters()),
-        lr=stage1_lr,
-        weight_decay=1e-4,
-    )
-
-    trainer1 = Trainer(
-        model=model,
-        train_loader=train_loader,
-        val_loader=val_loader,
-        criterion=criterion,
-        optimizer=optimizer1,
-        device=device,
-        checkpoint_dir=str(exp_dir / "stage1"),
-        patience=stage1_epochs + 1,  # Don't early stop in stage 1
-    )
-
-    history1 = trainer1.train(num_epochs=stage1_epochs)
-
-    print(f"\nStage 1 complete. Val F1: {history1['best_val_f1']:.4f}")
-
-    # -------------------------------------------------------------------------
-    # Stage 2: Unfreeze and fine-tune
-    # -------------------------------------------------------------------------
-    print("\n" + "-" * 50)
-    print(f"STAGE 2: Fine-tune all layers ({stage2_epochs} epochs)")
-    print("-" * 50)
-
-    model.unfreeze_features()
-    _, trainable = count_parameters(model)
-    print(f"Trainable parameters: {trainable:,}")
-    print(f"Learning rate: {stage2_lr}")
-
-    optimizer2 = torch.optim.Adam(model.parameters(), lr=stage2_lr, weight_decay=1e-4)
-
-    scheduler2 = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer2, mode="max", factor=0.5, patience=5, verbose=True
-    )
-
-    trainer2 = Trainer(
-        model=model,
-        train_loader=train_loader,
-        val_loader=val_loader,
-        criterion=criterion,
-        optimizer=optimizer2,
-        scheduler=scheduler2,
-        device=device,
-        checkpoint_dir=str(exp_dir),
-        patience=patience,
-    )
-
-    history2 = trainer2.train(num_epochs=stage2_epochs)
-
-    # Combine histories
-    combined_history = {
-        "best_val_f1": max(history1["best_val_f1"], history2["best_val_f1"]),
-        "best_epoch": history2["best_epoch"] + stage1_epochs,
-        "stage1_val_f1": history1["best_val_f1"],
-        "stage2_val_f1": history2["best_val_f1"],
-    }
-
-    return combined_history
-
-
-def save_experiment_summary(
-    exp_dir,
-    experiment_name,
-    args,
-    history,
-    augment_pitch,
-    augment_stretch,
-    augment_specaug,
-):
-    """Save experiment summary to file."""
-    import json
-
-    summary = {
-        "experiment_name": experiment_name,
-        "augmentation": {
-            "pitch_shift": augment_pitch,
-            "time_stretch": augment_stretch,
-            "specaugment": augment_specaug,
-        },
-        "training": {
-            "two_stage": args.two_stage,
-            "seed": args.seed,
-        },
-        "results": {
-            "best_val_f1": float(history["best_val_f1"]),
-            "best_epoch": int(history["best_epoch"]),
-        },
-    }
-
-    summary_path = exp_dir / "experiment_summary.json"
-    with open(summary_path, "w") as f:
-        json.dump(summary, f, indent=2)
-
-    print(f"Experiment summary saved to: {summary_path}")
-
-
-if __name__ == "__main__":
-    main()
+    return train_dataset, val_dataset

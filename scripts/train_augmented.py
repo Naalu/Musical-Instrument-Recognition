@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """Training script with configurable data augmentation for ablation studies.
 
 This script supports running ablation experiments to measure the impact of
@@ -86,65 +87,33 @@ Two-Stage Training (recommended for best results):
     aug_group.add_argument(
         "--specaug-only",
         action="store_true",
-        help="Only SpecAugment (frequency/time masking)",
+        help="Only SpecAugment",
     )
     aug_group.add_argument(
         "--full-augment",
         action="store_true",
-        help="All augmentations (pitch + stretch + SpecAugment)",
+        help="All augmentations combined",
     )
-    aug_group.add_argument(
-        "--custom",
+
+    # Optional: Two-stage training
+    parser.add_argument(
+        "--two-stage",
         action="store_true",
-        help="Custom augmentation (use --pitch, --stretch, --specaug flags)",
+        help="Use two-stage training (freeze then unfreeze)",
     )
 
-    # Custom augmentation flags (used with --custom)
-    parser.add_argument(
-        "--pitch", action="store_true", help="Enable pitch shift (with --custom)"
-    )
-    parser.add_argument(
-        "--stretch", action="store_true", help="Enable time stretch (with --custom)"
-    )
-    parser.add_argument(
-        "--specaug", action="store_true", help="Enable SpecAugment (with --custom)"
-    )
-
-    # Training configuration
+    # Training parameters
     parser.add_argument(
         "--config",
         type=str,
         default="configs/baseline.yml",
-        help="Path to base config file (default: configs/baseline.yml)",
+        help="Path to config file",
     )
     parser.add_argument(
         "--epochs",
         type=int,
         default=None,
-        help="Number of training epochs (overrides config)",
-    )
-    parser.add_argument(
-        "--two-stage",
-        action="store_true",
-        help="Use two-stage training (freeze then fine-tune)",
-    )
-    parser.add_argument(
-        "--stage1-epochs",
-        type=int,
-        default=5,
-        help="Epochs for stage 1 - frozen features (default: 5)",
-    )
-    parser.add_argument(
-        "--stage2-epochs",
-        type=int,
-        default=45,
-        help="Epochs for stage 2 - fine-tuning (default: 45)",
-    )
-    parser.add_argument(
-        "--stage2-lr",
-        type=float,
-        default=1e-5,
-        help="Learning rate for stage 2 (default: 1e-5)",
+        help="Number of epochs (overrides config)",
     )
     parser.add_argument(
         "--batch-size",
@@ -153,29 +122,23 @@ Two-Stage Training (recommended for best results):
         help="Batch size (overrides config)",
     )
     parser.add_argument(
-        "--lr",
-        type=float,
-        default=None,
-        help="Learning rate (overrides config)",
-    )
-    parser.add_argument(
         "--seed",
         type=int,
         default=42,
-        help="Random seed (default: 42)",
+        help="Random seed",
     )
     parser.add_argument(
         "--experiment-name",
         type=str,
         default=None,
-        help="Name for this experiment (auto-generated if not provided)",
+        help="Custom experiment name",
     )
 
     return parser.parse_args()
 
 
 def get_augmentation_settings(args):
-    """Determine augmentation settings based on command line args.
+    """Get augmentation flags from command line arguments.
 
     Returns:
         Tuple of (augment_pitch, augment_stretch, augment_specaug, experiment_name)
@@ -190,15 +153,6 @@ def get_augmentation_settings(args):
         return False, False, True, "ablation_specaug_only"
     elif args.full_augment:
         return True, True, True, "full_augment"
-    elif args.custom:
-        name_parts = ["custom"]
-        if args.pitch:
-            name_parts.append("pitch")
-        if args.stretch:
-            name_parts.append("stretch")
-        if args.specaug:
-            name_parts.append("specaug")
-        return args.pitch, args.stretch, args.specaug, "_".join(name_parts)
     else:
         raise ValueError("No augmentation preset specified")
 
@@ -230,9 +184,7 @@ def main():
         f"Augmentation: pitch={augment_pitch}, stretch={augment_stretch}, specaug={augment_specaug}"
     )
     if args.two_stage:
-        print(
-            f"Training: Two-stage (Stage 1: {args.stage1_epochs} epochs, Stage 2: {args.stage2_epochs} epochs)"
-        )
+        print("Training: Two-stage (freeze then unfreeze)")
     print()
 
     # Load config
@@ -309,7 +261,7 @@ def main():
         batch_size=batch_size,
         shuffle=True,
         num_workers=num_workers,
-        pin_memory=True,
+        pin_memory=(device.type == "cuda"),
     )
 
     val_loader = DataLoader(
@@ -317,7 +269,7 @@ def main():
         batch_size=batch_size,
         shuffle=False,
         num_workers=num_workers,
-        pin_memory=True,
+        pin_memory=(device.type == "cuda"),
     )
 
     print(f"\nTrain batches: {len(train_loader)}")
@@ -336,13 +288,12 @@ def main():
     print("=" * 70)
 
     model = create_densenet121(
-        num_classes=config["model"]["num_classes"],
+        num_classes=config["data"]["num_classes"],
         pretrained=config["model"]["pretrained"],
-        dropout=config["model"]["dropout"],
+        dropout_rate=config["model"]["dropout"],
     )
 
-    total_params, trainable_params = count_parameters(model)
-    print(f"Total parameters: {total_params:,}")
+    trainable_params = count_parameters(model)
     print(f"Trainable parameters: {trainable_params:,}")
 
     model = model.to(device)
@@ -357,69 +308,20 @@ def main():
     print("TRAINING")
     print("=" * 70)
 
-    if args.two_stage:
-        # Two-stage training
-        history = train_two_stage(
-            model=model,
-            train_loader=train_loader,
-            val_loader=val_loader,
-            criterion=criterion,
-            device=device,
-            exp_dir=exp_dir,
-            config=config,
-            args=args,
-        )
-    else:
-        # Single-stage training
-        history = train_single_stage(
-            model=model,
-            train_loader=train_loader,
-            val_loader=val_loader,
-            criterion=criterion,
-            device=device,
-            exp_dir=exp_dir,
-            config=config,
-            args=args,
-        )
+    epochs = args.epochs or config["train"]["num_epochs"]
+    lr = config["train"]["learning_rate"]
 
-    # =========================================================================
-    # RESULTS
-    # =========================================================================
-    print("\n" + "=" * 70)
-    print("TRAINING COMPLETE")
-    print("=" * 70)
-    print(f"Experiment: {experiment_name}")
-    print(f"Best validation F1: {history['best_val_f1']:.4f}")
-    print(f"Best epoch: {history['best_epoch']}")
-    print(f"Checkpoint saved to: {exp_dir / 'best_model.pth'}")
-    print()
-
-    # Save experiment summary
-    save_experiment_summary(
-        exp_dir,
-        experiment_name,
-        args,
-        history,
-        augment_pitch,
-        augment_stretch,
-        augment_specaug,
+    optimizer = torch.optim.Adam(
+        model.parameters(),
+        lr=lr,
+        weight_decay=config["train"].get("weight_decay", 1e-4),
     )
 
-    return history
-
-
-def train_single_stage(
-    model, train_loader, val_loader, criterion, device, exp_dir, config, args
-):
-    """Single-stage training (all parameters trainable)."""
-    lr = args.lr or config["train"]["learning_rate"]
-    epochs = args.epochs or config["train"]["num_epochs"]
-    patience = config["train"]["early_stopping"]["patience"]
-
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=1e-4)
-
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer, mode="max", factor=0.5, patience=5, verbose=True
+        optimizer,
+        mode="max",
+        factor=0.5,
+        patience=5,
     )
 
     trainer = Trainer(
@@ -431,139 +333,46 @@ def train_single_stage(
         scheduler=scheduler,
         device=device,
         checkpoint_dir=str(exp_dir),
-        patience=patience,
+        patience=config["train"].get("patience", 10),
     )
 
-    print(f"Training for {epochs} epochs (patience={patience})")
+    print(f"Training for {epochs} epochs")
     print(f"Learning rate: {lr}")
     print()
 
+    # Train
     history = trainer.train(num_epochs=epochs)
 
-    return history
+    # =========================================================================
+    # RESULTS
+    # =========================================================================
+    print("\n" + "=" * 70)
+    print("TRAINING COMPLETE")
+    print("=" * 70)
+    print(f"Experiment: {experiment_name}")
+    print(f"Best validation F1: {trainer.best_val_f1:.4f}")
+    print(f"Checkpoint saved to: {exp_dir / 'best_model.pth'}")
+    print()
 
+    if trainer.best_val_f1 >= 0.60:
+        print("✅ Target F1-score of 0.60 achieved!")
+    else:
+        print(f"⚠️  Target not quite reached. Best: {trainer.best_val_f1:.4f}")
 
-def train_two_stage(
-    model, train_loader, val_loader, criterion, device, exp_dir, config, args
-):
-    """Two-stage training with feature freezing."""
-    from src.models.densenet import freeze_backbone, unfreeze_backbone
-
-    stage1_epochs = args.stage1_epochs
-    stage2_epochs = args.stage2_epochs
-    stage1_lr = args.lr or config["train"]["learning_rate"]
-    stage2_lr = args.stage2_lr
-    patience = config["train"]["early_stopping"]["patience"]
-
-    # -------------------------------------------------------------------------
-    # Stage 1: Frozen backbone, train classifier only
-    # -------------------------------------------------------------------------
-    print("-" * 50)
-    print(f"STAGE 1: Train classifier head ({stage1_epochs} epochs)")
-    print("-" * 50)
-
-    freeze_backbone(model)
-    _, trainable = count_parameters(model)
-    print(f"Trainable parameters: {trainable:,}")
-
-    optimizer1 = torch.optim.Adam(
-        filter(lambda p: p.requires_grad, model.parameters()),
-        lr=stage1_lr,
-        weight_decay=1e-4,
-    )
-
-    trainer1 = Trainer(
-        model=model,
-        train_loader=train_loader,
-        val_loader=val_loader,
-        criterion=criterion,
-        optimizer=optimizer1,
-        device=device,
-        checkpoint_dir=str(exp_dir / "stage1"),
-        patience=stage1_epochs + 1,  # Don't early stop in stage 1
-    )
-
-    history1 = trainer1.train(num_epochs=stage1_epochs)
-
-    print(f"\nStage 1 complete. Val F1: {history1['best_val_f1']:.4f}")
-
-    # -------------------------------------------------------------------------
-    # Stage 2: Unfreeze and fine-tune
-    # -------------------------------------------------------------------------
-    print("\n" + "-" * 50)
-    print(f"STAGE 2: Fine-tune all layers ({stage2_epochs} epochs)")
-    print("-" * 50)
-
-    unfreeze_backbone(model)
-    _, trainable = count_parameters(model)
-    print(f"Trainable parameters: {trainable:,}")
-    print(f"Learning rate: {stage2_lr}")
-
-    optimizer2 = torch.optim.Adam(model.parameters(), lr=stage2_lr, weight_decay=1e-4)
-
-    scheduler2 = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer2, mode="max", factor=0.5, patience=5, verbose=True
-    )
-
-    trainer2 = Trainer(
-        model=model,
-        train_loader=train_loader,
-        val_loader=val_loader,
-        criterion=criterion,
-        optimizer=optimizer2,
-        scheduler=scheduler2,
-        device=device,
-        checkpoint_dir=str(exp_dir),
-        patience=patience,
-    )
-
-    history2 = trainer2.train(num_epochs=stage2_epochs)
-
-    # Combine histories
-    combined_history = {
-        "best_val_f1": max(history1["best_val_f1"], history2["best_val_f1"]),
-        "best_epoch": history2["best_epoch"] + stage1_epochs,
-        "stage1_val_f1": history1["best_val_f1"],
-        "stage2_val_f1": history2["best_val_f1"],
-    }
-
-    return combined_history
-
-
-def save_experiment_summary(
-    exp_dir,
-    experiment_name,
-    args,
-    history,
-    augment_pitch,
-    augment_stretch,
-    augment_specaug,
-):
-    """Save experiment summary to file."""
-    import json
-
-    summary = {
-        "experiment_name": experiment_name,
-        "augmentation": {
-            "pitch_shift": augment_pitch,
-            "time_stretch": augment_stretch,
-            "specaugment": augment_specaug,
-        },
-        "training": {
-            "two_stage": args.two_stage,
-            "seed": args.seed,
-        },
-        "results": {
-            "best_val_f1": float(history["best_val_f1"]),
-            "best_epoch": int(history["best_epoch"]),
-        },
-    }
-
-    summary_path = exp_dir / "experiment_summary.json"
+    # Save experiment summary
+    summary_path = exp_dir / "experiment_summary.txt"
     with open(summary_path, "w") as f:
-        json.dump(summary, f, indent=2)
+        f.write(f"Experiment: {experiment_name}\n")
+        f.write(
+            f"Augmentation: pitch={augment_pitch}, stretch={augment_stretch}, specaug={augment_specaug}\n"
+        )
+        f.write(f"Best validation F1: {trainer.best_val_f1:.4f}\n")
+        f.write(f"Config: {args.config}\n")
+        f.write(f"Seed: {seed}\n")
+        f.write(f"Epochs: {epochs}\n")
+        f.write(f"Batch size: {batch_size}\n")
 
-    print(f"Experiment summary saved to: {summary_path}")
+    print(f"Summary saved to: {summary_path}")
 
 
 if __name__ == "__main__":
