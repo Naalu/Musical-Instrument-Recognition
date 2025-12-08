@@ -193,14 +193,6 @@ class IRMASTestDataset(Dataset):
         """Convert audio to mel-spectrogram.
 
         CRITICAL: Must match training preprocessing exactly!
-        - Keep raw dB scale (no normalization to [0,1])
-        - Repeat single channel to 3 channels for DenseNet
-
-        Args:
-            audio: Audio waveform
-
-        Returns:
-            Mel-spectrogram tensor [3, n_mels, time]
         """
         # Compute mel-spectrogram
         mel_spec = librosa.feature.melspectrogram(
@@ -214,17 +206,16 @@ class IRMASTestDataset(Dataset):
         # Convert to dB scale (same as training)
         mel_spec_db = librosa.power_to_db(mel_spec, ref=np.max)
 
-        # DO NOT normalize to [0,1] - keep raw dB scale!
-        # Training data is in range [-80, 0] dB
-
         # Convert to tensor and add channel dimension
+        # Shape: (n_mels, time) → (1, n_mels, time)
         mel_tensor = torch.from_numpy(mel_spec_db).float().unsqueeze(0)
 
-        # Repeat to 3 channels (DenseNet expects RGB)
-        # This matches what happens during training (implicitly or explicitly)
-        mel_tensor = mel_tensor.repeat(3, 1, 1)
+        # ✅ FIX: Do NOT repeat here - let the model handle it!
+        # The model's forward() method will automatically repeat (1, H, W) → (3, H, W)
+        # OR if you must repeat here, do it correctly:
+        # mel_tensor = mel_tensor.unsqueeze(0).repeat(1, 3, 1, 1).squeeze(0)
 
-        return mel_tensor
+        return mel_tensor  # Shape: (1, n_mels, time)
 
     def __len__(self):
         return len(self.samples)
