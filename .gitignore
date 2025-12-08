@@ -35,7 +35,6 @@ ENV/
 *.swp
 *.swo
 *~
-.DS_Store
 
 # Jupyter Notebooks
 .ipynb_checkpoints/
@@ -48,12 +47,29 @@ data/cache/
 *.mp3
 *.flac
 
-# Outputs
-outputs/
+# =============================================================================
+# OUTPUTS - Selective inclusion for paper reproducibility
+# =============================================================================
+# Ignore cached features (this is most of your 13GB)
+outputs/features/
+
+# Ignore all .npy files anywhere
+*.npy
+
+# Ignore all checkpoint files anywhere  
 *.pth
 *.pt
 *.ckpt
 *.h5
+
+# KEEP outputs/runs/ with its small files (CSV, JSON, PNG, PDF, TEX)
+# The checkpoint exclusion above handles the .pth files
+# So outputs/runs/ will only contain the small metadata files
+
+# =============================================================================
+# Other exclusions
+# =============================================================================
+checkpoints/
 
 # Logs
 *.log

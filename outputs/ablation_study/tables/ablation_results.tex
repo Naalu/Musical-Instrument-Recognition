@@ -1,0 +1,15 @@
+\begin{table}
+\caption{Ablation Study Results: Impact of Data Augmentation}
+\label{tab:ablation_results}
+\begin{tabular}{lrrrr}
+\toprule
+Experiment & Val F1 (\%) & Train F1 (\%) & Gap (\%) & Best Epoch \\
+\midrule
+Baseline (No Aug) & 59.25 & 99.55 & 40.30 & 27 \\
+Pitch Shift Only & 66.43 & 88.70 & 22.27 & 48 \\
+Time Stretch Only & 66.40 & 89.56 & 23.16 & 46 \\
+SpecAugment Only & 62.80 & 60.92 & -1.88 & 47 \\
+Full Augmentation (100ep) & 74.79 & 70.29 & -4.50 & 95 \\
+\bottomrule
+\end{tabular}
+\end{table}

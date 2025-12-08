@@ -1,0 +1,21 @@
+{
+  "experiment_name": "ablation_stretch_only_20251201_071038",
+  "timestamp": "2025-12-01T08:19:44.751427",
+  "augmentation": {
+    "augment_pitch": false,
+    "augment_stretch": true,
+    "augment_specaug": false
+  },
+  "training": {
+    "two_stage": true,
+    "total_epochs": 50,
+    "seed": 42
+  },
+  "best_metrics": {
+    "epoch": 46,
+    "val_f1": 0.6640230071397156,
+    "val_loss": 0.9951391021410624,
+    "train_f1": 0.8956166346046522
+  },
+  "config_path": "configs/baseline.yml"
+}

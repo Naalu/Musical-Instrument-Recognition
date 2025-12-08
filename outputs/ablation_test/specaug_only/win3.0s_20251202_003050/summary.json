@@ -1,0 +1,57 @@
+{
+  "config": {
+    "checkpoint": "outputs/runs/ablation_specaug_only_20251201_082045/best_model.pth",
+    "test_dir": "data/raw/IRMAS-TestingData-Part1/Part1",
+    "window_length": 3.0,
+    "hop_length": 1.5,
+    "num_samples": 807
+  },
+  "best_strategy": "median",
+  "best_macro_f1": 0.233867137279607,
+  "all_results": {
+    "max": {
+      "macro_f1": 0.2271464596349885,
+      "micro_f1": 0.3506815365551425
+    },
+    "mean": {
+      "macro_f1": 0.23302035032808657,
+      "micro_f1": 0.3630731102850062
+    },
+    "majority": {
+      "macro_f1": 0.22615748701880453,
+      "micro_f1": 0.34820322180916974
+    },
+    "confidence_weighted": {
+      "macro_f1": 0.22990024397863815,
+      "micro_f1": 0.3593556381660471
+    },
+    "linear_softmax": {
+      "macro_f1": 0.23230264989949145,
+      "micro_f1": 0.35811648079306074
+    },
+    "topk_mean_3": {
+      "macro_f1": 0.23368747967766224,
+      "micro_f1": 0.35687732342007433
+    },
+    "topk_mean_5": {
+      "macro_f1": 0.2323465414159391,
+      "micro_f1": 0.36059479553903345
+    },
+    "attention_weighted": {
+      "macro_f1": 0.23219384915223626,
+      "micro_f1": 0.36059479553903345
+    },
+    "median": {
+      "macro_f1": 0.233867137279607,
+      "micro_f1": 0.36059479553903345
+    },
+    "geometric_mean": {
+      "macro_f1": 0.22980608498603097,
+      "micro_f1": 0.35811648079306074
+    },
+    "trimmed_mean": {
+      "macro_f1": 0.23179308377037078,
+      "micro_f1": 0.36059479553903345
+    }
+  }
+}

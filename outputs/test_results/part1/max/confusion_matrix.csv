@@ -1,0 +1,12 @@
+,Cello,Clarinet,Flute,Acoustic Guitar,Electric Guitar,Organ,Piano,Saxophone,Trumpet,Violin,Voice
+Cello,1,0,0,2,0,0,0,0,0,0,23
+Clarinet,0,0,0,1,0,0,0,2,5,0,0
+Flute,0,2,14,8,3,0,0,0,1,0,0
+Acoustic Guitar,2,2,5,78,7,2,0,2,6,4,27
+Electric Guitar,17,3,0,5,48,26,15,28,8,3,64
+Organ,0,0,0,1,5,9,1,4,0,0,9
+Piano,1,6,7,7,9,3,87,108,36,0,31
+Saxophone,0,0,1,0,0,0,1,3,1,0,1
+Trumpet,0,0,0,0,0,0,0,0,0,0,0
+Violin,1,0,0,0,0,0,0,0,0,0,1
+Voice,4,0,0,0,3,0,0,0,1,2,50

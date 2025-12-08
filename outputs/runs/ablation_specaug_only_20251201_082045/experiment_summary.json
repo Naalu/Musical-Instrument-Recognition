@@ -1,0 +1,21 @@
+{
+  "experiment_name": "ablation_specaug_only_20251201_082045",
+  "timestamp": "2025-12-01T09:29:13.966920",
+  "augmentation": {
+    "augment_pitch": false,
+    "augment_stretch": false,
+    "augment_specaug": true
+  },
+  "training": {
+    "two_stage": true,
+    "total_epochs": 50,
+    "seed": 42
+  },
+  "best_metrics": {
+    "epoch": 47,
+    "val_f1": 0.6280406918844972,
+    "val_loss": 0.9835486423086237,
+    "train_f1": 0.6092344683083736
+  },
+  "config_path": "configs/baseline.yml"
+}

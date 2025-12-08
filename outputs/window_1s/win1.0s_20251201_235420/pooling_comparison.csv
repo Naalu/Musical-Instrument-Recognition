@@ -1,0 +1,12 @@
+Strategy,Macro_F1,Micro_F1
+attention_weighted,0.2297,0.3147
+topk_mean_3,0.2231,0.3073
+topk_mean_5,0.2190,0.3123
+mean,0.2178,0.3234
+trimmed_mean,0.2171,0.3234
+linear_softmax,0.2157,0.3123
+confidence_weighted,0.2148,0.3185
+max,0.2147,0.2949
+geometric_mean,0.2114,0.3024
+median,0.2053,0.3073
+majority,0.1954,0.3123

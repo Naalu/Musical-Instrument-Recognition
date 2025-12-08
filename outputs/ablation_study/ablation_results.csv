@@ -1,0 +1,6 @@
+experiment,augment_pitch,augment_stretch,augment_specaug,val_f1,val_loss,best_epoch,total_epochs,train_f1,seed,val_f1_pct,train_f1_pct,overfitting_gap
+Baseline (No Aug),False,False,False,0.5925035589175294,1.1456617955808286,27,37,0.9954714763583635,42,59.25,99.55,40.3
+Pitch Shift Only,True,False,False,0.6642897200685222,0.9952470704361245,48,50,0.8870324045568654,42,66.43,88.7,22.27
+Time Stretch Only,False,True,False,0.6640230071397156,0.9951391021410624,46,50,0.8956166346046522,42,66.4,89.56,23.16
+SpecAugment Only,False,False,True,0.6280406918844972,0.9835486423086237,47,50,0.6092344683083736,42,62.8,60.92,-1.88
+Full Augmentation (100ep),True,True,True,0.7479437937582819,0.9575471679369608,95,100,0.7029,42,74.79,70.29,-4.5

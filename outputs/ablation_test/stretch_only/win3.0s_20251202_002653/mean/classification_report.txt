@@ -1,0 +1,17 @@
+                 precision    recall  f1-score   support
+
+          Cello     0.0556    0.0385    0.0455        26
+       Clarinet     0.0000    0.0000    0.0000         8
+          Flute     0.4000    0.4286    0.4138        28
+Acoustic Guitar     0.8317    0.6222    0.7119       135
+Electric Guitar     0.6182    0.3134    0.4159       217
+          Organ     0.0909    0.1379    0.1096        29
+          Piano     0.8191    0.2610    0.3959       295
+      Saxophone     0.0185    0.4286    0.0355         7
+        Trumpet     0.0000    0.0000    0.0000         0
+         Violin     0.0000    0.0000    0.0000         2
+          Voice     0.2526    0.8000    0.3840        60
+
+       accuracy                         0.3680       807
+      macro avg     0.2806    0.2755    0.2284       807
+   weighted avg     0.6427    0.3680    0.4243       807

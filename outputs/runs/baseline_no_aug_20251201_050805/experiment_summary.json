@@ -1,0 +1,21 @@
+{
+  "experiment_name": "baseline_no_aug_20251201_050805",
+  "timestamp": "2025-12-01T05:59:24.014074",
+  "augmentation": {
+    "augment_pitch": false,
+    "augment_stretch": false,
+    "augment_specaug": false
+  },
+  "training": {
+    "two_stage": true,
+    "total_epochs": 37,
+    "seed": 42
+  },
+  "best_metrics": {
+    "epoch": 27,
+    "val_f1": 0.5925035589175294,
+    "val_loss": 1.1456617955808286,
+    "train_f1": 0.9954714763583635
+  },
+  "config_path": "configs/baseline.yml"
+}

@@ -1,0 +1,21 @@
+{
+  "pooling_comparison": {
+    "max": {
+      "macro_f1": 0.2160543598862775,
+      "micro_f1": 0.3333333333333333
+    },
+    "mean": {
+      "macro_f1": 0.24820620720981704,
+      "micro_f1": 0.355638166047088
+    },
+    "majority": {
+      "macro_f1": 0.23902443091363323,
+      "micro_f1": 0.35315985130111527
+    },
+    "confidence_weighted": {
+      "macro_f1": 0.22749284587384871,
+      "micro_f1": 0.355638166047088
+    }
+  },
+  "best_strategy": "mean"
+}
